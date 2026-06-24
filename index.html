@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Калькулятор риска гестационного уросепсиса</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#fff; --ink:#1a2230; --muted:#5b6b82;
+    --line:#e2e8f2; --accent:#2563eb; --low:#16a34a; --high:#dc2626;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.5;padding:24px 14px}
+  .wrap{max-width:560px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:18px;margin-bottom:14px;box-shadow:0 1px 3px rgba(20,30,50,.04)}
+  .marker{display:flex;justify-content:space-between;align-items:center;
+    padding:12px 0;border-bottom:1px solid var(--line);gap:12px}
+  .marker:last-child{border-bottom:none}
+  .marker .name{font-weight:600;font-size:15px}
+  .marker .crit{color:var(--muted);font-size:12px}
+  .toggle{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:0 0 auto}
+  .toggle button{border:none;background:#fff;padding:8px 16px;cursor:pointer;
+    font-size:14px;color:var(--muted);transition:.15s}
+  .toggle button.on-no{background:#eef2f7;color:var(--ink)}
+  .toggle button.on-yes{background:var(--accent);color:#fff}
+  .result{text-align:center;padding:22px 18px}
+  .prob{font-size:44px;font-weight:800;line-height:1}
+  .verdict{display:inline-block;margin-top:12px;padding:6px 16px;border-radius:999px;
+    font-weight:700;font-size:14px}
+  .verdict.low{background:#dcfce7;color:var(--low)}
+  .verdict.high{background:#fee2e2;color:var(--high)}
+  .note{color:var(--muted);font-size:12px;margin-top:14px}
+  .formula{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;
+    color:var(--muted);background:#f7f9fc;border-radius:8px;padding:10px;margin-top:10px;word-break:break-word}
+  details{margin-top:8px}
+  summary{cursor:pointer;color:var(--accent);font-size:13px}
+  .copyright{text-align:center;color:var(--muted);font-size:12px;line-height:1.7;
+    margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+  .copyright .cr-authors{font-weight:600;color:var(--ink)}
+  .copyright .cr-disc{margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Прогнозирование гестационного уросепсиса</h1>
+  <p class="sub">Калькулятор риска на основе многофакторной логистической регрессии (AUC 0,880; точность 83,5%). Порог отсечения — 60%.</p>
+
+  <div class="card" id="markers"></div>
+
+  <div class="card result">
+    <div class="prob" id="prob">—</div>
+    <div id="verdict"></div>
+    <div class="note">Порог высокого риска: вероятность ≥ 60%.<br>
+      Чувствительность 77,6% · специфичность 84,8%.</div>
+    <details>
+      <summary>Показать формулу</summary>
+      <div class="formula" id="formula"></div>
+    </details>
+  </div>
+
+  <footer class="copyright">
+    <div class="cr-authors">© 2026 Тамазова Л.Б., Апресян С.В.</div>
+    <div>Все права защищены.</div>
+    <div class="cr-disc">Калькулятор предназначен для научных и образовательных целей.<br>
+      Не заменяет консультацию специалиста.</div>
+  </footer>
+</div>
+
+<script>
+  // Маркеры: коэффициент логистической регрессии + описание критерия
+  const MARKERS = [
+    {key:"СРБ",  coef:1.509, name:"СРБ",                  crit:"≥ 60 мг/л"},
+    {key:"САД",  coef:1.898, name:"САД",                  crit:"≤ 112 мм рт. ст."},
+    {key:"ЛДГ",  coef:2.230, name:"Лактатдегидрогеназа", crit:"≥ 224 Ед/л"},
+    {key:"ЩФ",   coef:1.784, name:"Щёлочная фосфатаза",   crit:"≥ 94 Ед/л"},
+    {key:"ПКТ",  coef:2.706, name:"Прокальцитонин",       crit:"≥ 0,5 нг/мл"},
+  ];
+  const INTERCEPT = -5.129;
+  const THRESHOLD = 60; // %
+
+  const state = {};
+  MARKERS.forEach(m => state[m.key] = 0);
+
+  const box = document.getElementById("markers");
+  MARKERS.forEach(m => {
+    const row = document.createElement("div");
+    row.className = "marker";
+    row.innerHTML = `
+      <div><div class="name">${m.name}</div><div class="crit">критерий: ${m.crit}</div></div>
+      <div class="toggle" data-key="${m.key}">
+        <button data-v="0" class="on-no">Нет</button>
+        <button data-v="1">Да</button>
+      </div>`;
+    box.appendChild(row);
+  });
+
+  document.querySelectorAll(".toggle").forEach(t => {
+    const key = t.dataset.key;
+    t.querySelectorAll("button").forEach(b => {
+      b.onclick = () => {
+        const v = +b.dataset.v;
+        state[key] = v;
+        t.querySelectorAll("button").forEach(x => x.className = "");
+        b.className = v ? "on-yes" : "on-no";
+        // снять подсветку с противоположной с дефолтным «нет»
+        t.querySelectorAll("button").forEach(x=>{
+          if(x!==b) x.className = (+x.dataset.v===0 && v===1)? "" : x.className;
+        });
+        calc();
+      };
+    });
+  });
+
+  function calc(){
+    let z = INTERCEPT;
+    MARKERS.forEach(m => z += m.coef * state[m.key]);
+    const p = 100 / (1 + Math.exp(-z));
+    document.getElementById("prob").textContent = p.toFixed(1) + "%";
+    const high = p >= THRESHOLD;
+    const v = document.getElementById("verdict");
+    v.className = "verdict " + (high ? "high" : "low");
+    v.textContent = high ? "Высокий риск" : "Низкий риск";
+  }
+
+  document.getElementById("formula").innerHTML =
+    "p = 1 / (1 + e^(−z)) × 100%<br><br>z = −5,129 + 1,509·Х_СРБ + 1,898·Х_САД + 2,230·Х_ЛДГ + 1,784·Х_ЩФ + 2,706·Х_ПКТ<br><br>Х — бинарные: 1 = критерий выполнен, 0 = нет.";
+
+  calc();
+</script>
+</body>
+</html>
