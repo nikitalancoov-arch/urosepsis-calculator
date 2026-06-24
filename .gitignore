@@ -1,0 +1,4 @@
+.qrvenv/
+__pycache__/
+qr-urosepsis.*
+*.docx
